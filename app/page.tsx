@@ -1,103 +1,89 @@
-import Image from "next/image";
+"use client";
+import { Button } from "@/components/ui/button"
+import { WaveBackground } from "../components/common/Wave-background"
+import { HowItWorksSection } from "./HowItWork"
+import AboutSection from "./AboutSection"
+import TestimonialsSection from "./TestimonialsSection"
+import FooterSection from "./FooterSection"
+import ShinyText from '../components/ui/ShinyText';
+import BlurText from "../components/ui/BlurText";
+import { useRouter } from "next/navigation";
 
-export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+export default function HomePage() {
+    const router = useRouter();
+    return (
+        <div className="w-full pt-16" >
+            {/* ===== Hero Section ===== */}
+            <section className="relative min-h-screen flex items-center justify-center animate-fadeInUp">
+                <WaveBackground />
+                <main className="p-6 relative z-10 text-center max-w-4xl mx-auto">
+                    {/* Main Heading with ShinyText */}
+                    <div className="flex justify-center text-5xl md:text-7xl mb-8 font-bold">
+                        <ShinyText
+                            text="Welcome to HearSafe"
+                            disabled={false}
+                            speed={3}
+                            className='text-4xl md:text-6xl font-bold text-primary dark:[--shiny-color-start:#fff] dark:[--shiny-color-mid:#ccc] dark:[--shiny-color-end:#fff]'
+                        />
+                    </div>
+
+
+                    {/* Subheading with BlurText and Icon */}
+                    <div className="flex justify-center items-center gap-3 mb-6">
+                        <BlurText
+                            text="Quick Hearing Check from Home"
+                            delay={150}
+                            animateBy="words"
+                            direction="top"
+                            className="text-3xl md:text-4xl font-bold text-foreground"
+                            animationFrom={undefined}
+                            animationTo={undefined}
+                            onAnimationComplete={undefined}
+                        />
+
+                    </div>
+
+                    {/* Description */}
+                    <div className="space-y-3 mb-8">
+                        <p className="text-xl text-muted-foreground">
+                            A gentle 5–10 minute hearing screen designed for older adults.
+                        </p>
+                        <p className="text-lg text-muted-foreground">
+                            Clear instructions, large controls.
+                        </p>
+                    </div>
+
+                    {/* CTA Button */}
+                    <div className="flex justify-center">
+                        <Button
+                            variant="outline"
+                            className="px-8 py-4 text-lg hover:bg-primary hover:text-white transition-all duration-300"
+                            onClick={() => router.push("/login")}   // 👈 Redirect
+                        >
+                            Take a Test
+                        </Button>
+
+                    </div>
+                </main>
+            </section>
+
+            {/* ===== About Section ===== */}
+            <section>
+                <AboutSection />
+            </section>
+            {/* ===== How it works section ===== */}
+            <section>
+                <HowItWorksSection />
+            </section>
+            {/* ===== Testimonials ===== */}
+            <section>
+                <TestimonialsSection />
+            </section>
+            {/* ===== footer ===== */}
+            <section>
+                <FooterSection />
+            </section>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
-  );
+    )
 }
