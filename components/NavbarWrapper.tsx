@@ -6,7 +6,7 @@ import { Navbar } from "@/components/common/Navbar"
 
 export function NavbarWrapper() {
   const pathname = usePathname()
-  const hideNavbar = pathname === '/login' || pathname === '/sign-up'
+  const hideNavbar = pathname === '/login' || pathname === '/sign-up' || pathname?.startsWith('/test')
   
   return !hideNavbar ? <Navbar /> : null
 }

@@ -5,6 +5,7 @@ import "./globals.css"
 import { Navbar } from "@/components/common/Navbar"
 import { ThemeProvider } from "next-themes"
 import { NavbarWrapper } from "@/components/NavbarWrapper"
+// import { usePathname } from "next/navigation"
 
 const inter = Inter({ subsets: ["latin"] })
 const poppins = Poppins({ subsets: ["latin"], weight: ["400", "600", "700"] })
@@ -23,7 +24,7 @@ export default function RootLayout({
   const hideNavbar = 
     typeof window !== 'undefined' && 
     (window.location.pathname === '/signin' || 
-     window.location.pathname === '/signup')
+     window.location.pathname === '/signup' || window.location.pathname.startsWith('/test'))
 
   return (
     <html lang="en" suppressHydrationWarning>

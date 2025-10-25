@@ -8,10 +8,49 @@ import FooterSection from "./FooterSection"
 import ShinyText from '../components/ui/ShinyText';
 import BlurText from "../components/ui/BlurText";
 import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { onAuthStateChanged } from "firebase/auth";
+import { auth } from "@/lib/firebase/client";
+import { User } from "firebase/auth"
 
 
 export default function HomePage() {
     const router = useRouter();
+    const [user, setUser] = useState<User | null>(null)
+    const [loading, setLoading] = useState(true)
+
+    // Step 1: Check if user is logged in
+    useEffect(() => {
+        const unsubscribe = onAuthStateChanged(auth, (user) => {
+            setUser(user)
+            setLoading(false)
+        })
+
+        return () => unsubscribe()
+    }, [])
+
+    // Step 2: Handle button click
+    const handleTakeTest = () => {
+        if (user) {
+            // User is signed in - go to instructions
+            router.push("/test/instructions")
+        } else {
+            // User is not signed in - go to login with redirect info
+            router.push("/login?redirect=/test/instructions")
+        }
+    }
+
+    // Show loading while checking auth status
+    if (loading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+                    <p>Loading...</p>
+                </div>
+            </div>
+        )
+    }
     return (
         <div className="w-full pt-16" >
             {/* ===== Hero Section ===== */}
@@ -59,7 +98,7 @@ export default function HomePage() {
                         <Button
                             variant="outline"
                             className="px-8 py-4 text-lg hover:bg-primary hover:text-white transition-all duration-300"
-                            onClick={() => router.push("/login")}   // 👈 Redirect
+                            onClick={handleTakeTest}   // 👈 Redirect
                         >
                             Take a Test
                         </Button>
