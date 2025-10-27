@@ -10,9 +10,22 @@ import { useRouter } from "next/navigation"
 import { auth } from "@/lib/firebase/client"
 import { onAuthStateChanged } from "firebase/auth"
 import { User } from "firebase/auth"
-
+import { doc, setDoc, getDoc } from "firebase/firestore"
+import { db } from "@/lib/firebase/client"
 
 const TOTAL_LEVELS = 8
+
+// Test configuration - different frequencies and volumes for each level
+const testConfig = [
+  { level: 1, frequency: 250, volume: 30, volumeDb: 30 },   // Low frequency, loud
+  { level: 2, frequency: 500, volume: 25, volumeDb: 25 },
+  { level: 3, frequency: 1000, volume: 20, volumeDb: 20 },  // Mid frequency
+  { level: 4, frequency: 2000, volume: 15, volumeDb: 15 },
+  { level: 5, frequency: 4000, volume: 10, volumeDb: 10 },  // High frequency
+  { level: 6, frequency: 6000, volume: 5, volumeDb: 5 },
+  { level: 7, frequency: 8000, volume: 2, volumeDb: 2 },
+  { level: 8, frequency: 10000, volume: 0, volumeDb: 0 },   // Very high frequency, very quiet
+]
 
 export default function HearingTestPage() {
   const router = useRouter()
@@ -21,74 +34,123 @@ export default function HearingTestPage() {
   const [testComplete, setTestComplete] = useState(false)
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
+  const [testResults, setTestResults] = useState<Array<{
+    level: number
+    frequency: number
+    volumeDb: number
+    response: boolean
+    timestamp: Date
+  }>>([])
 
-  
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (!user) {
-        // User not logged in, redirect to login with return URL
         router.push("/login?redirect=/test")
       } else {
         setUser(user)
         setLoading(false)
       }
     })
-
     return () => unsubscribe()
   }, [router])
 
   useEffect(() => {
-    // Auto-play sound when level changes (only if user is authenticated)
     if (user && !loading) {
       playSound()
     }
   }, [currentLevel, user, loading])
 
   const playSound = () => {
+    if (isPlaying) return
+    
     setIsPlaying(true)
+    const currentConfig = testConfig[currentLevel - 1]
 
-    // Create audio context for generating test tones
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
-    const oscillator = audioContext.createOscillator()
-    const gainNode = audioContext.createGain()
+    try {
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+      const oscillator = audioContext.createOscillator()
+      const gainNode = audioContext.createGain()
 
-    // Different frequencies for different levels (decreasing volume)
-    const frequency = 440 + currentLevel * 100 // Varying frequency
-    const volume = 0.3 - currentLevel * 0.03 // Decreasing volume
+      oscillator.type = "sine"
+      oscillator.frequency.setValueAtTime(currentConfig.frequency, audioContext.currentTime)
+      gainNode.gain.setValueAtTime(currentConfig.volume, audioContext.currentTime)
 
-    oscillator.type = "sine"
-    oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime)
-    gainNode.gain.setValueAtTime(volume, audioContext.currentTime)
+      oscillator.connect(gainNode)
+      gainNode.connect(audioContext.destination)
 
-    oscillator.connect(gainNode)
-    gainNode.connect(audioContext.destination)
+      oscillator.start()
 
-    oscillator.start()
-
-    // Play for 2 seconds
-    setTimeout(() => {
-      oscillator.stop()
-      audioContext.close()
+      setTimeout(() => {
+        oscillator.stop()
+        audioContext.close()
+        setIsPlaying(false)
+      }, 2000)
+    } catch (error) {
+      console.error("Error playing sound:", error)
       setIsPlaying(false)
-    }, 2000)
+    }
   }
 
-  const handleResponse = (canHear: boolean) => {
-    console.log(`[v0] Level ${currentLevel}: User ${canHear ? "can" : "cannot"} hear the sound`)
+  const handleResponse = async (canHear: boolean) => {
+    const currentConfig = testConfig[currentLevel - 1]
+    
+    // Store the response
+    const newResult = {
+      level: currentConfig.level,
+      frequency: currentConfig.frequency,
+      volumeDb: currentConfig.volumeDb,
+      response: canHear,
+      timestamp: new Date()
+    }
+
+    const updatedResults = [...testResults, newResult]
+    setTestResults(updatedResults)
+
+    console.log(`Level ${currentLevel}: User ${canHear ? "can" : "cannot"} hear ${currentConfig.frequency}Hz at ${currentConfig.volumeDb}dB`)
 
     if (currentLevel < TOTAL_LEVELS) {
       setCurrentLevel(currentLevel + 1)
     } else {
+      // Test complete - save to Firebase
+      await saveResultsToFirebase(updatedResults)
       setTestComplete(true)
+    }
+  }
+
+  const saveResultsToFirebase = async (results: typeof testResults) => {
+    if (!user) return
+
+    try {
+      const testData = {
+        userId: user.uid,
+        testDate: new Date(),
+        results: results,
+        totalScore: Math.round((results.filter(r => r.response).length / results.length) * 100),
+        levelsCompleted: results.length
+      }
+
+      // Save to user's test history
+      const testId = `test_${Date.now()}`
+      await setDoc(doc(db, "users", user.uid, "hearingTests", testId), testData)
+
+      // Also save as latest test for quick access
+      await setDoc(doc(db, "users", user.uid), {
+        latestTest: testData,
+        lastTestDate: new Date()
+      }, { merge: true })
+
+      console.log("Test results saved to Firebase")
+    } catch (error) {
+      console.error("Error saving test results:", error)
     }
   }
 
   const resetTest = () => {
     setCurrentLevel(1)
     setTestComplete(false)
+    setTestResults([])
   }
 
-  // STEP 4: Show loading while checking auth
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
@@ -122,13 +184,20 @@ export default function HearingTestPage() {
               You've completed all {TOTAL_LEVELS} levels of the hearing test. Thank you for participating.
             </p>
           </div>
-          <Button onClick={resetTest} size="lg" className="min-w-40">
-            Restart Test
-          </Button>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <Button onClick={() => router.push('/results')} size="lg" className="min-w-40">
+              See Results
+            </Button>
+            <Button onClick={resetTest} variant="outline" size="lg" className="min-w-40">
+              Restart Test
+            </Button>
+          </div>
         </Card>
       </div>
     )
   }
+
+  const currentConfig = testConfig[currentLevel - 1]
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
@@ -155,6 +224,13 @@ export default function HearingTestPage() {
         {/* Wave icon */}
         <div className="flex justify-center mb-12">
           <WaveIcon isPlaying={isPlaying} />
+        </div>
+
+        {/* Current test info */}
+        <div className="text-center mb-4">
+          <p className="text-sm text-muted-foreground">
+            Frequency: {currentConfig.frequency}Hz • Volume: {currentConfig.volumeDb}dB
+          </p>
         </div>
 
         {/* Question */}
