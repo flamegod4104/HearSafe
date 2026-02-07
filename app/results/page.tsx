@@ -21,7 +21,10 @@ export default function ResultsPage() {
   const [testData, setTestData] = useState<any>(null)
   const [hoveredPoint, setHoveredPoint] = useState<number | null>(null)
   const [generatingPDF, setGeneratingPDF] = useState(false)
+  const [mlPrediction, setMlPrediction] = useState<string | null>(null)
   const resultsRef = useRef<HTMLDivElement>(null)
+  const [nearbyClinics, setNearbyClinics] = useState<any[]>([])
+  const [loadingClinics, setLoadingClinics] = useState(false)
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -35,6 +38,14 @@ export default function ResultsPage() {
     })
     return () => unsubscribe()
   }, [router])
+
+  // New addition 6th feb 2025
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const prediction = localStorage.getItem("mlPrediction")
+      setMlPrediction(prediction)
+    }
+  }, [])
 
   const fetchTestResults = async (userId: string) => {
     try {
@@ -85,7 +96,7 @@ export default function ResultsPage() {
         volumes: mockData.map((r: any) => r.volumeDb)
       }
     }
-    
+
     const results = testData.results
     return {
       levels: results.map((r: any) => r.level),
@@ -103,13 +114,169 @@ export default function ResultsPage() {
 
   // Calculate overall score
   const score = testData?.totalScore || Math.round((results.filter((r: boolean) => r).length / results.length) * 100)
-  
+
   // Hearing range analysis
-  const hearingRange = {
-    low: results[0] && results[1], // 250Hz & 500Hz
-    mid: results[2] && results[3], // 1000Hz & 2000Hz
-    high: results[4] && results[5] // 4000Hz & 6000Hz
+  // SIMPLE FIX: Match Hearing Range to ML Diagnosis
+  // FIXED: Hearing range analysis based on ML Diagnosis
+  const getFrequencyStatus = () => {
+    // If ML Diagnosis says "Severe Loss", show limited for mid/high
+    if (mlPrediction && mlPrediction.toLowerCase().includes("severe")) {
+      return {
+        low: "Normal",     // Low frequencies often normal in age-related loss
+        mid: "Limited",    // Mid frequencies affected
+        high: "Limited"    // High frequencies most affected
+      }
+    }
+
+    // If ML Diagnosis says "Mild Loss"
+    if (mlPrediction && mlPrediction.toLowerCase().includes("mild")) {
+      return {
+        low: "Normal",
+        mid: "Normal",
+        high: "Limited"    // Only high frequencies affected
+      }
+    }
+
+    // Default: Use test results
+    return {
+      low: results[0] && results[1] ? "Normal" : "Limited",
+      mid: results[2] && results[3] ? "Normal" : "Limited",
+      high: results[4] && results[5] ? "Normal" : "Limited"
+    }
   }
+
+  const frequencyStatus = getFrequencyStatus()
+
+  // Step 1: Figure out what kind of hearing loss this is
+  const getHearingCondition = () => {
+    if (score >= 80) return "normal"
+    if (score >= 60) return "mild"
+    if (score >= 40) return "moderate"
+    if (score >= 20) return "severe"
+    return "profound"
+  }
+
+  const hearingCondition = getHearingCondition()
+
+  // Step 2: Create different recommendations for each condition
+  const getRecommendations = () => {
+    if (hearingCondition === "normal") {
+      return [
+        {
+          title: "Keep Protecting Your Ears",
+          description: "Use earplugs at concerts and loud events. Avoid long exposure to loud noise.",
+          icon: "hearing"
+        },
+        {
+          title: "Regular Check-ups",
+          description: "Test your hearing every 6 months to catch any early changes.",
+          icon: "monitoring"
+        },
+        {
+          title: "Healthy Habits",
+          description: "Avoid smoking and manage stress for better hearing health.",
+          icon: "favorite"
+        }
+      ]
+    }
+
+    if (hearingCondition === "mild") {
+      return [
+        {
+          title: "See a Specialist Soon",
+          description: "Schedule an appointment with an audiologist in the next month.",
+          icon: "medical_information"
+        },
+        {
+          title: "Better Communication",
+          description: "Face people when talking and ask them to speak clearly.",
+          icon: "forum"
+        },
+        {
+          title: "Monitor Regularly",
+          description: "Test every 3 months and note any changes.",
+          icon: "monitoring"
+        }
+      ]
+    }
+
+    if (hearingCondition === "moderate") {
+      return [
+        {
+          title: "Urgent Professional Help",
+          description: "Book an appointment with a hearing specialist within 2 weeks.",
+          icon: "medical_services"
+        },
+        {
+          title: "Consider Hearing Aids",
+          description: "Discuss hearing aid options with your doctor.",
+          icon: "hearing"
+        },
+        {
+          title: "Home Adjustments",
+          description: "Reduce background noise at home for better hearing.",
+          icon: "home"
+        }
+      ]
+    }
+
+    // For severe and profound
+    return [
+      {
+        title: "Immediate Medical Attention",
+        description: "Consult an ENT specialist immediately. This requires professional care.",
+        icon: "emergency"
+      },
+      {
+        title: "Advanced Hearing Solutions",
+        description: "Discuss hearing aids or cochlear implants with a specialist.",
+        icon: "medical_services"
+      },
+      {
+        title: "Support and Training",
+        description: "Join support groups and learn communication strategies.",
+        icon: "support_agent"
+      }
+    ]
+  }
+
+  // ==================== GOOGLE MAPS FUNCTION ====================
+
+  // This function finds nearby hearing doctors
+  const findNearbyDoctors = () => {
+    setLoadingClinics(true)
+
+    // Simple method - just create links to Google Maps
+    setTimeout(() => {
+      setNearbyClinics([
+        {
+          name: "Search Audiologists Near You",
+          description: "Click to find hearing specialists in your area",
+          link: "https://www.google.com/maps/search/audiologist+near+me"
+        },
+        {
+          name: "Find ENT Specialists",
+          description: "Click to search for ear doctors",
+          link: "https://www.google.com/maps/search/ENT+specialist+near+me"
+        },
+        {
+          name: "Hearing Clinics",
+          description: "Click to find hearing clinics nearby",
+          link: "https://www.google.com/maps/search/hearing+clinic+near+me"
+        }
+      ])
+      setLoadingClinics(false)
+    }, 1500) // Wait 1.5 seconds to show loading
+  }
+
+  // Auto-find doctors if score is bad
+  useEffect(() => {
+    if (score < 50) {
+      findNearbyDoctors()
+    }
+  }, [score])
+
+  const smartRecommendations = getRecommendations()
 
   const getHearingAssessment = () => {
     if (score >= 90) return { level: "Excellent", color: "text-green-500", bg: "bg-green-500/10" }
@@ -121,82 +288,40 @@ export default function ResultsPage() {
   const assessment = getHearingAssessment()
 
   // Calculate positions for the line chart - FIXED VERSION
+  // Calculate positions for the line chart - FOR HIGH VOLUME VALUES
   const getPointPosition = (index: number) => {
-    const totalWidth = 800 // Approximate width of chart area
-    const totalHeight = 350 // Approximate height of chart area
-    
-    const x = (index / (Math.max(levels.length - 1, 1))) * totalWidth
-    const y = totalHeight - (volumes[index] / 30) * totalHeight // Invert Y axis (0dB at top, 30dB at bottom)
-    
+    const totalWidth = 800
+    const totalHeight = 350
+
+    // X position: Leave margins and distribute evenly
+    const marginX = 60
+    const chartWidth = totalWidth - (2 * marginX)
+    const x = marginX + (index / (Math.max(levels.length - 1, 1))) * chartWidth
+
+    // Y position: Scale down the volume values to fit the graph
+    const marginY = 40
+    const chartHeight = totalHeight - (2 * marginY)
+
+    // Scale volume (e.g., 80dB -> 0.8 * chartHeight from the top)
+    const scaledVolume = volumes[index] / 100 // Scale 100dB to full height
+    const y = marginY + (scaledVolume * chartHeight)
+
     return { x, y }
   }
 
   // Generate SVG path for the line - FIXED VERSION
   const generateLinePath = () => {
     if (levels.length === 0) return ""
-    
+
     const points = levels.map((_: any, index: number) => getPointPosition(index))
     let path = `M ${points[0].x} ${points[0].y}`
-    
+
     for (let i = 1; i < points.length; i++) {
       path += ` L ${points[i].x} ${points[i].y}`
     }
-    
+
     return path
   }
-
-  // PDF Download Function
-  // const downloadPDF = async () => {
-  //   if (!resultsRef.current) return
-    
-  //   setGeneratingPDF(true)
-  //   try {
-  //     const canvas = await html2canvas(resultsRef.current, {
-  //       scale: 2,
-  //       useCORS: true,
-  //       logging: false,
-  //       backgroundColor: "#ffffff"
-  //     })
-
-  //     const imgData = canvas.toDataURL('image/png')
-  //     const pdf = new jsPDF('p', 'mm', 'a4')
-  //     const pdfWidth = pdf.internal.pageSize.getWidth()
-  //     const pdfHeight = pdf.internal.pageSize.getHeight()
-      
-  //     // Calculate dimensions to maintain aspect ratio
-  //     const imgWidth = canvas.width
-  //     const imgHeight = canvas.height
-  //     const ratio = imgWidth / imgHeight
-  //     let width = pdfWidth - 20 // Margin
-  //     let height = width / ratio
-      
-  //     // If content is too tall, adjust height
-  //     if (height > pdfHeight - 20) {
-  //       height = pdfHeight - 20
-  //       width = height * ratio
-  //     }
-
-  //     const x = (pdfWidth - width) / 2
-  //     const y = (pdfHeight - height) / 2
-
-  //     pdf.addImage(imgData, 'PNG', x, y, width, height)
-      
-  //     // Add header with test date
-  //     if (testData?.testDate) {
-  //       const testDate = new Date(testData.testDate).toLocaleDateString()
-  //       pdf.setFontSize(10)
-  //       pdf.setTextColor(100)
-  //       pdf.text(`Hearing Test Results - ${testDate}`, 15, 15)
-  //     }
-      
-  //     pdf.save(`hearing-test-results-${new Date().toISOString().split('T')[0]}.pdf`)
-  //   } catch (error) {
-  //     console.error('Error generating PDF:', error)
-  //     alert('Error generating PDF. Please try again.')
-  //   } finally {
-  //     setGeneratingPDF(false)
-  //   }
-  // }
 
   const recommendations = [
     {
@@ -244,7 +369,7 @@ export default function ResultsPage() {
     <div className="min-h-screen">
       <WaveBackground />
       <div ref={resultsRef} className="relative z-10 max-w-6xl mx-auto p-6">
-        
+
         {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-4xl md:text-4xl font-bold mb-4 mt-10">Your Hearing Results</h1>
@@ -259,20 +384,42 @@ export default function ResultsPage() {
         </div>
 
         {/* Overall Score Card */}
+
+
+        {/* Overall Score Card */}
         <Card className="p-8 mb-8 text-center">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="flex-1">
               <h2 className="text-2xl font-semibold mb-4">Overall Hearing Score</h2>
+
+              {/* ML Diagnosis - Moved outside the circle */}
+              {mlPrediction && (
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold text-gray-700 mb-2">ML Diagnosis</h3>
+                </div>
+              )}
+
               <div className="relative inline-block">
                 <div className="w-48 h-48 rounded-full border-8 border-gray-200 flex items-center justify-center">
                   <div className="text-center">
-                    <div className={`text-5xl font-bold ${assessment.color}`}>{score}%</div>
-                    <div className={`text-lg font-semibold mt-2 ${assessment.color}`}>
-                      {assessment.level}
+                    {/* Only show the percentage, remove "Good" text */}
+                    <div className={`text-5xl font-bold ${score >= 80 ? "text-green-600" :
+                      score >= 60 ? "text-blue-600" :
+                        score >= 40 ? "text-yellow-600" :
+                          "text-red-600"
+                      }`}>
+                      {score}%
+                    </div>
+                    {/* Optional: Add score category as small text if you want */}
+                    <div className="text-sm text-muted-foreground mt-2">
+                      {score >= 80 ? "Excellent" :
+                        score >= 60 ? "Good" :
+                          score >= 40 ? "Fair" :
+                            "Needs Attention"}
                     </div>
                   </div>
                 </div>
-                <div 
+                <div
                   className="absolute top-0 left-0 w-48 h-48 rounded-full border-8 border-transparent border-t-primary border-r-primary transform -rotate-45"
                   style={{
                     clipPath: `inset(0 0 ${100 - score}% 0)`
@@ -280,29 +427,29 @@ export default function ResultsPage() {
                 ></div>
               </div>
             </div>
-            
+
             <div className="flex-1 text-left space-y-4">
               <h3 className="text-xl font-semibold mb-4">Hearing Range Analysis</h3>
-              
+
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <span>Low Frequencies</span>
-                  <div className={`px-3 py-1 rounded-full ${hearingRange.low ? 'bg-green-500/20 text-green-600' : 'bg-orange-500/20 text-orange-600'}`}>
-                    {hearingRange.low ? 'Normal' : 'Limited'}
+                  <div className={`px-3 py-1 rounded-full ${frequencyStatus.low === "Normal" ? 'bg-green-500/20 text-green-600' : 'bg-orange-500/20 text-orange-600'}`}>
+                    {frequencyStatus.low}
                   </div>
                 </div>
-                
+
                 <div className="flex items-center justify-between">
                   <span>Mid Frequencies</span>
-                  <div className={`px-3 py-1 rounded-full ${hearingRange.mid ? 'bg-green-500/20 text-green-600' : 'bg-orange-500/20 text-orange-600'}`}>
-                    {hearingRange.mid ? 'Normal' : 'Limited'}
+                  <div className={`px-3 py-1 rounded-full ${frequencyStatus.mid === "Normal" ? 'bg-green-500/20 text-green-600' : 'bg-orange-500/20 text-orange-600'}`}>
+                    {frequencyStatus.mid}
                   </div>
                 </div>
-                
+
                 <div className="flex items-center justify-between">
                   <span>High Frequencies</span>
-                  <div className={`px-3 py-1 rounded-full ${hearingRange.high ? 'bg-green-500/20 text-green-600' : 'bg-orange-500/20 text-orange-600'}`}>
-                    {hearingRange.high ? 'Normal' : 'Limited'}
+                  <div className={`px-3 py-1 rounded-full ${frequencyStatus.high === "Normal" ? 'bg-green-500/20 text-green-600' : 'bg-orange-500/20 text-orange-600'}`}>
+                    {frequencyStatus.high}
                   </div>
                 </div>
               </div>
@@ -326,7 +473,7 @@ export default function ResultsPage() {
                 <span>5dB</span>
                 <span>0dB</span>
               </div>
-              
+
               {/* Graph Area */}
               <div className="flex-1 relative ml-4">
                 {/* Grid Lines */}
@@ -345,12 +492,12 @@ export default function ResultsPage() {
 
                 {/* SVG Line Chart - FIXED VERSION */}
                 <div className="absolute inset-0">
-                  <svg 
-                    width="100%" 
-                    height="100%" 
-                    viewBox="0 0 800 350" 
+                  <svg
+                    width="100%"
+                    height="100%"
+                    viewBox="0 0 800 350"
                     preserveAspectRatio="none"
-                    className="overflow-visible"
+                    style={{ overflow: 'visible' }}
                   >
                     {/* Gradient for the line */}
                     <defs>
@@ -370,13 +517,13 @@ export default function ResultsPage() {
                       strokeLinecap="round"
                       strokeLinejoin="round"
                     />
-                    
+
                     {/* Data Points */}
                     {levels.map((level: number, index: number) => {
                       const { x, y } = getPointPosition(index)
                       const isHeard = results[index]
                       const isHovered = hoveredPoint === index
-                      
+
                       return (
                         <g key={level}>
                           {/* Glow effect on hover */}
@@ -389,7 +536,7 @@ export default function ResultsPage() {
                               className="animate-pulse"
                             />
                           )}
-                          
+
                           {/* Outer circle */}
                           <circle
                             cx={x}
@@ -402,7 +549,7 @@ export default function ResultsPage() {
                             onMouseEnter={() => setHoveredPoint(index)}
                             onMouseLeave={() => setHoveredPoint(null)}
                           />
-                          
+
                           {/* Inner symbol */}
                           <text
                             x={x}
@@ -465,16 +612,16 @@ export default function ResultsPage() {
             </div>
 
             {/* Y-axis title */}
-            <div className="absolute -left-4 top-1/2 transform -rotate-90 -translate-y-1/2 text-sm text-muted-foreground font-semibold">
+            <div className="absolute left-4 top-1/2 transform -rotate-90 -translate-y-1/2 text-sm text-muted-foreground font-semibold">
               Volume (dB)
             </div>
 
             {/* X-axis title */}
-            <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 text-sm text-muted-foreground font-semibold">
+            <div className="absolute -bottom-14 left-1/2 transform -translate-x-1/2 text-sm text-muted-foreground font-semibold">
               Frequency (Hz)
             </div>
           </div>
-          
+
           {/* Legend */}
           <div className="flex justify-center gap-6 mt-12">
             <div className="flex items-center gap-2">
@@ -508,11 +655,22 @@ export default function ResultsPage() {
         </Card>
 
         {/* Recommendations */}
+        {/* Smart Recommendations */}
         <div className="grid md:grid-cols-2 gap-8 mb-8">
-          <Card className="p-6">
-            <h2 className="text-2xl font-semibold mb-6">Recommendations</h2>
+          <Card className="p-4">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-2xl font-semibold">Personalized Recommendations</h2>
+              <div className={`px-3 py-1 rounded-full text-sm font-medium ${hearingCondition === "normal" ? "bg-green-100 text-green-800" :
+                hearingCondition === "mild" ? "bg-blue-100 text-blue-800" :
+                  hearingCondition === "moderate" ? "bg-yellow-100 text-yellow-800" :
+                    "bg-red-100 text-red-800"
+                }`}>
+                {hearingCondition.charAt(0).toUpperCase() + hearingCondition.slice(1)}
+              </div>
+            </div>
+
             <div className="space-y-4">
-              {recommendations.map((rec, index) => (
+              {smartRecommendations.map((rec, index) => (
                 <div key={index} className="flex items-start gap-4 p-4 rounded-lg bg-secondary/50">
                   <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
                     <span className="material-symbols-outlined text-primary">{rec.icon}</span>
@@ -526,56 +684,95 @@ export default function ResultsPage() {
             </div>
           </Card>
 
-          <Card className="p-6">
-            <h2 className="text-2xl font-semibold mb-6">Next Steps</h2>
-            <div className="space-y-3">
-              {nextSteps.map((step, index) => (
-                <div key={index} className="flex items-center gap-3 p-3 rounded-lg border border-border">
-                  <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                    <span className="text-primary text-sm font-bold">{index + 1}</span>
+          <div className="space-y-8">
+            {/* Next Steps Card (kept the same) */}
+            <Card className="p-6">
+              <h2 className="text-2xl font-semibold mb-6">Next Steps</h2>
+              <div className="space-y-3">
+                {nextSteps.map((step, index) => (
+                  <div key={index} className="flex items-center gap-3 p-3 rounded-lg border border-border">
+                    <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                      <span className="text-primary text-sm font-bold">{index + 1}</span>
+                    </div>
+                    <span className="text-sm">{step}</span>
                   </div>
-                  <span className="text-sm">{step}</span>
+                ))}
+              </div>
+
+              <div className="mt-6 space-y-3">
+                <Button
+                  className="w-full"
+                  onClick={() => router.push('/test/instructions')}
+                >
+                  Retake Test
+                </Button>
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => router.push('/resources')}
+                >
+                  Explore Resources
+                </Button>
+              </div>
+            </Card>
+
+            {/* ========== NEW: Nearby Doctors Section ========== */}
+            {/* This ONLY shows if score is less than 50% */}
+            {score < 50 && (
+              <Card className="p-6 border-2 border-orange-200 bg-orange-50/30">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-full bg-orange-500/20 flex items-center justify-center flex-shrink-0">
+                    <span className="material-symbols-outlined text-orange-600">emergency</span>
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-semibold text-orange-700">Find Nearby Hearing Specialists</h2>
+                    <p className="text-sm text-muted-foreground">Based on your test results</p>
+                  </div>
                 </div>
-              ))}
-            </div>
-            
-            <div className="mt-6 space-y-3">
-              <Button 
-                className="w-full"
-                onClick={() => router.push('/test/instructions')}
-              >
-                Retake Test
-              </Button>
-              <Button 
-                variant="outline" 
-                className="w-full"
-                onClick={() => router.push('/resources')}
-              >
-                Explore Resources
-              </Button>
-              {/* NEW: Download PDF Button */}
-              {/* <Button 
-                variant="outline" 
-                className="w-full"
-                onClick={downloadPDF}
-                disabled={generatingPDF}
-              >
-                {generatingPDF ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary mr-2"></div>
-                    Generating PDF...
-                  </>
+
+                {/* Loading state */}
+                {loadingClinics ? (
+                  <div className="text-center py-6">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-600 mx-auto mb-3"></div>
+                    <p className="text-sm text-gray-600">Searching for nearby specialists...</p>
+                  </div>
                 ) : (
-                  <>
-                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    Download Results (PDF)
-                  </>
+                  /* Show doctors list */
+                  <div className="space-y-3">
+                    {nearbyClinics.map((clinic, index) => (
+                      <div
+                        key={index}
+                        className="p-4 border border-orange-100 rounded-lg bg-white hover:bg-orange-50/50 cursor-pointer transition-colors"
+                        onClick={() => window.open(clinic.link, '_blank')}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center flex-shrink-0">
+                            <span className="material-symbols-outlined text-orange-600 text-sm">location_on</span>
+                          </div>
+                          <div>
+                            <h3 className="font-semibold text-gray-800 mb-1">{clinic.name}</h3>
+                            <p className="text-sm text-gray-600">{clinic.description}</p>
+                            <p className="text-xs text-orange-600 mt-2 flex items-center gap-1">
+                              <span className="material-symbols-outlined text-xs">open_in_new</span>
+                              Click to search on Google Maps
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* Extra help message */}
+                    <div className="mt-4 p-3 bg-orange-100/50 rounded-lg">
+                      <p className="text-sm text-orange-800">
+                        <span className="font-semibold">Important:</span> Your test indicates significant hearing loss.
+                        Please consult with a healthcare professional as soon as possible.
+                      </p>
+                    </div>
+                  </div>
                 )}
-              </Button> */}
-            </div>
-          </Card>
+              </Card>
+            )}
+          </div>
         </div>
 
         {/* Important Notice */}
@@ -587,8 +784,8 @@ export default function ResultsPage() {
             <div>
               <h3 className="font-semibold mb-2 text-blue-700">Important Notice</h3>
               <p className="text-sm text-white-600">
-                This is a screening test only and should not replace professional medical advice. 
-                If you have concerns about your hearing, please consult with a qualified audiologist 
+                This is a screening test only and should not replace professional medical advice.
+                If you have concerns about your hearing, please consult with a qualified audiologist
                 or healthcare provider for a comprehensive evaluation.
               </p>
             </div>
