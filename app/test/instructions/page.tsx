@@ -84,7 +84,7 @@ export default function InstructionsPage() {
           </div>
 
           <Button
-            onClick={handleStartTest}
+            onClick={() => router.push("/qa") }
             size="lg"
             className="w-full text-lg"
             disabled={!accepted}

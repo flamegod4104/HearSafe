@@ -1,0 +1,147 @@
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI
+import joblib
+import numpy as np
+import pandas as pd
+from datetime import datetime
+import uuid
+import os
+
+app = FastAPI()
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+MODEL_PATH = "hearsafe_rf.pkl"
+
+# ============================
+# Utility Functions
+# ============================
+
+def cochlear_load_index(hours, volume, noisy_env, events):
+    return round((hours * volume) + (2 if noisy_env else 0) + (events * 1.5), 2)
+
+def age_group(age):
+    if 18 <= age <= 25:
+        return "18-25"
+    elif 26 <= age <= 35:
+        return "26-35"
+    else:
+        return "18-25"
+
+def load_normative(age, sex):
+    df = pd.read_csv("ehfa_baseline.csv")
+    group = age_group(age)
+    baseline = df[(df["age_group"] == group) & (df["sex"] == sex)]
+    return baseline.sort_values("freq_hz")["mean_threshold"].values
+
+def hf_shift_index(user_thresholds, normative):
+    return round(np.mean(np.array(user_thresholds) - normative), 2)
+
+def rule_engine(cli, hfsi):
+    score = 0
+    if cli > 6:
+        score += 1
+    if hfsi > 5:
+        score += 2
+
+    if score <= 1:
+        return "GREEN"
+    elif score <= 3:
+        return "YELLOW"
+    elif score <= 4:
+        return "ORANGE"
+    else:
+        return "RED"
+
+def load_model():
+    if os.path.exists(MODEL_PATH):
+        return joblib.load(MODEL_PATH)
+    return None
+
+# ============================
+# Routes
+# ============================
+
+@app.get("/")
+def home():
+    return {"message": "HearSafe AI Backend Running"}
+
+@app.post("/analyze")
+def predict(data: dict):
+    try:
+        age = data["age"]
+        sex = data["sex"]
+        hours = data["hours_per_day"]
+        volume = data["volume_level"]
+        noisy_env = data["noisy_environment"]
+        events = data["events_per_month"]
+        thresholds = data["thresholds"]
+
+        cli = cochlear_load_index(hours, volume, noisy_env, events)
+        normative = load_normative(age, sex)
+        hfsi = hf_shift_index(thresholds, normative)
+        ehfa_mean = round(np.mean(thresholds), 2)
+        asymmetry = 0
+
+        feature_vector = [
+            hours,
+            volume,
+            noisy_env,
+            events,
+            cli,
+            ehfa_mean,
+            hfsi,
+            asymmetry
+        ]
+
+        model = load_model()
+
+        if model:
+            reverse_map = {0: "GREEN", 1: "YELLOW", 2: "ORANGE", 3: "RED"}
+            pred = model.predict([feature_vector])[0]
+            risk = reverse_map[pred]
+        else:
+            risk = rule_engine(cli, hfsi)
+
+        # Save to users.csv
+        new_row = {
+            "user_id": str(uuid.uuid4())[:8],
+            "age": age,
+            "sex": sex,
+            "date": datetime.now().date(),
+            "hours_per_day": hours,
+            "volume_level": volume,
+            "noisy_environment": noisy_env,
+            "events_per_month": events,
+            "cli": cli,
+            "ehfa_mean": ehfa_mean,
+            "hf_shift_index": hfsi,
+            "asymmetry": asymmetry,
+            "risk_level": risk
+        }
+
+        df = pd.read_csv("users.csv")
+        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+        df.to_csv("users.csv", index=False)
+
+        # Calculate overall score (100 - (hfsi * 2))
+        overall_score = max(0, min(100, 100 - (hfsi * 2)))
+        return {
+            "risk" : risk,
+            "risk_level": risk,
+            "overall_score" : overall_score,
+            "cli": cli,
+            "hf_shift_index": hfsi,
+            "ehfa_mean": ehfa_mean,
+            "thresholds": data["thresholds"]
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
