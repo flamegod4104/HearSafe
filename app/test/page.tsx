@@ -1,6 +1,10 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback } from "react"
+import { auth } from "@/lib/firebase/client"
+import { db } from "@/lib/firebase/client"
+import { collection, addDoc, Timestamp } from "firebase/firestore"
+import { onAuthStateChanged } from "firebase/auth"
 import { WaveBackground } from "@/components/common/Wave-background"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -24,11 +28,11 @@ type WHOGrade = {
 }
 
 const getWHOGrade = (db: number): WHOGrade => {
-  if (db <= 25) return { grade: 0, label: "Normal",        colorClass: "text-green-600",  bgClass: "bg-green-500/10 border-green-500/20"  }
-  if (db <= 40) return { grade: 1, label: "Mild Loss",     colorClass: "text-yellow-600", bgClass: "bg-yellow-500/10 border-yellow-500/20" }
+  if (db <= 25) return { grade: 0, label: "Normal", colorClass: "text-green-600", bgClass: "bg-green-500/10 border-green-500/20" }
+  if (db <= 40) return { grade: 1, label: "Mild Loss", colorClass: "text-yellow-600", bgClass: "bg-yellow-500/10 border-yellow-500/20" }
   if (db <= 60) return { grade: 2, label: "Moderate Loss", colorClass: "text-orange-600", bgClass: "bg-orange-500/10 border-orange-500/20" }
-  if (db <= 80) return { grade: 3, label: "Severe Loss",   colorClass: "text-red-600",    bgClass: "bg-red-500/10 border-red-500/20"       }
-  return              { grade: 4, label: "Profound Loss",  colorClass: "text-red-800",    bgClass: "bg-red-900/20 border-red-800/30"       }
+  if (db <= 80) return { grade: 3, label: "Severe Loss", colorClass: "text-red-600", bgClass: "bg-red-500/10 border-red-500/20" }
+  return { grade: 4, label: "Profound Loss", colorClass: "text-red-800", bgClass: "bg-red-900/20 border-red-800/30" }
 }
 
 // Correct dB-to-gain: amplitude = 10^((dB - 90) / 20)
@@ -61,9 +65,18 @@ export default function HearingTestPage() {
   const [toneHeard, setToneHeard] = useState<boolean | null>(null)
   const [yesCount, setYesCount] = useState(0)
   const [attempts, setAttempts] = useState(0)
+  const [noFloor, setNoFloor] = useState<number>(MIN_DB)
   const [thresholds, setThresholds] = useState<Thresholds>({ left: [], right: [] })
   const [isPlaying, setIsPlaying] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [currentUser, setCurrentUser] = useState<any>(null)
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user)
+    })
+    return () => unsubscribe()
+  }, [])
 
   // Refs
   const audioCtxRef = useRef<AudioContext | null>(null)
@@ -77,7 +90,7 @@ export default function HearingTestPage() {
   // ─── Audio ──────────────────────────────────────────────────────────────────
   const stopTone = useCallback(() => {
     if (oscillatorRef.current) {
-      try { oscillatorRef.current.stop() } catch (_) {}
+      try { oscillatorRef.current.stop() } catch (_) { }
       oscillatorRef.current = null
     }
     if (audioCtxRef.current) {
@@ -87,7 +100,7 @@ export default function HearingTestPage() {
     setIsPlaying(false)
   }, [])
 
-  const playTone = useCallback((freq: number, db: number, duration = 1500) => {
+  const playTone = useCallback((freq: number, db: number, duration = 1500, ear: "left" | "right" = "left") => {
     stopTone()
     const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
     audioCtxRef.current = ctx
@@ -103,8 +116,12 @@ export default function HearingTestPage() {
     gain.gain.setValueAtTime(gainValue, ctx.currentTime + duration / 1000 - 0.05)
     gain.gain.linearRampToValueAtTime(0, ctx.currentTime + duration / 1000)
 
+    const panner = ctx.createStereoPanner()
+    panner.pan.setValueAtTime(ear === "left" ? -1 : 1, ctx.currentTime)
+
     osc.connect(gain)
-    gain.connect(ctx.destination)
+    gain.connect(panner)
+    panner.connect(ctx.destination)
     osc.start()
     oscillatorRef.current = osc
     setIsPlaying(true)
@@ -134,13 +151,16 @@ export default function HearingTestPage() {
     }
 
     if (!heard) {
-      // Didn't hear → increase 5 dB, reset counts
+      // Didn't hear → raise floor, increase 5 dB, reset yes count
+      const newFloor = Math.max(noFloor, currentDb)
+      setNoFloor(newFloor)
       setCurrentDb(prev => Math.min(MAX_DB, prev + 5))
       setYesCount(0)
       setAttempts(0)
     } else {
-      // Heard once → drop 10 dB, keep hunting
-      setCurrentDb(prev => Math.max(MIN_DB, prev - 10))
+      // Heard → drop 10 dB but never go below (noFloor + 5)
+      const safeMin = Math.max(MIN_DB, noFloor + 5)
+      setCurrentDb(prev => Math.max(safeMin, prev - 10))
       setYesCount(newYes)
       setAttempts(newAttempts)
     }
@@ -164,6 +184,7 @@ export default function HearingTestPage() {
     setToneHeard(null)
     setYesCount(0)
     setAttempts(0)
+    setNoFloor(MIN_DB)
     setCurrentDb(START_DB)
 
     if (currentFreqIndex < FREQUENCIES.length - 1) {
@@ -182,7 +203,7 @@ export default function HearingTestPage() {
     setStage("done")
 
     // PTA = average of 500, 1000, 2000 Hz thresholds (indices 1, 2, 3)
-    const ptaLeft  = [1, 2, 3].reduce((s, i) => s + (finalThresholds.left[i]  ?? 0), 0) / 3
+    const ptaLeft = [1, 2, 3].reduce((s, i) => s + (finalThresholds.left[i] ?? 0), 0) / 3
     const ptaRight = [1, 2, 3].reduce((s, i) => s + (finalThresholds.right[i] ?? 0), 0) / 3
 
     const qaData = JSON.parse(localStorage.getItem("qaData") || "{}")
@@ -195,12 +216,12 @@ export default function HearingTestPage() {
     const payload = {
       ...qaData,
       user_id: uid,
-      left_thresholds:  finalThresholds.left,
+      left_thresholds: finalThresholds.left,
       right_thresholds: finalThresholds.right,
       frequencies: FREQUENCIES,
-      pta_left:  ptaLeft.toFixed(1),
+      pta_left: ptaLeft.toFixed(1),
       pta_right: ptaRight.toFixed(1),
-      who_grade_left:  getWHOGrade(ptaLeft).grade,
+      who_grade_left: getWHOGrade(ptaLeft).grade,
       who_grade_right: getWHOGrade(ptaRight).grade,
     }
 
@@ -211,38 +232,59 @@ export default function HearingTestPage() {
         body: JSON.stringify(payload),
       })
       const data = await res.json()
-      localStorage.setItem("analysisResult", JSON.stringify({
+
+      const resultToStore = {
         ...data,
-        left_thresholds:  finalThresholds.left,
+        left_thresholds: finalThresholds.left,
         right_thresholds: finalThresholds.right,
         frequencies: FREQUENCIES,
-        pta_left:  ptaLeft.toFixed(1),
+        pta_left: ptaLeft.toFixed(1),
         pta_right: ptaRight.toFixed(1),
-        who_grade_left:  getWHOGrade(ptaLeft),
+        who_grade_left: getWHOGrade(ptaLeft),
         who_grade_right: getWHOGrade(ptaRight),
-      }))
-    } catch {
-      // Offline fallback
-      const worstPta = Math.max(ptaLeft, ptaRight)
-      localStorage.setItem("analysisResult", JSON.stringify({
-        left_thresholds:  finalThresholds.left,
-        right_thresholds: finalThresholds.right,
-        frequencies: FREQUENCIES,
-        pta_left:  ptaLeft.toFixed(1),
-        pta_right: ptaRight.toFixed(1),
-        who_grade_left:  getWHOGrade(ptaLeft),
-        who_grade_right: getWHOGrade(ptaRight),
-        risk: worstPta > 60 ? "RED" : worstPta > 40 ? "ORANGE" : worstPta > 25 ? "YELLOW" : "GREEN",
-        overall_score: Math.max(0, Math.round(100 - (ptaLeft + ptaRight) / 2)),
-      }))
+      }
+
+      // Save to localStorage for results page
+      localStorage.setItem("analysisResult", JSON.stringify(resultToStore))
+
+      // Save to Firestore if user is logged in
+      if (currentUser) {
+        await addDoc(
+          collection(db, "users", currentUser.uid, "hearingTests"),
+          {
+            testDate: Timestamp.now(),
+            totalScore: data.overall_score ?? Math.round(100 - (ptaLeft + ptaRight) / 2),
+            riskLevel: data.risk || "GREEN",
+            ptaLeft: parseFloat(ptaLeft.toFixed(1)),
+            ptaRight: parseFloat(ptaRight.toFixed(1)),
+            whoGradeLeft: getWHOGrade(ptaLeft).grade,
+            whoGradeRight: getWHOGrade(ptaRight).grade,
+            whoLabelLeft: getWHOGrade(ptaLeft).label,
+            whoLabelRight: getWHOGrade(ptaRight).label,
+            leftThresholds: finalThresholds.left,
+            rightThresholds: finalThresholds.right,
+            frequencies: FREQUENCIES,
+            ehfaMean: data.ehfa_mean ?? null,
+            hfShiftIndex: data.hf_shift_index ?? null,
+            cli: data.cli ?? null,
+            age: qaData.age ?? null,
+            sex: qaData.sex ?? null,
+          }
+        )
+        console.log("✅ Test saved to Firestore")
+      }
+    } catch (err) {
+      console.error("Backend or Firestore error:", err)
     }
 
+    // ← submitResults ends here — router.push is now OUTSIDE the catch
+    //   so it always navigates after try/catch completes
+    setLoading(false)
     router.push("/results")
-  }
+  } // ← submitResults closes here ✅
 
   // ─── CALIBRATION PAGE ────────────────────────────────────────────────────────
   if (stage === "calibration") {
-    const calPct = Math.round(((calDb - MIN_DB) / (MAX_DB - MIN_DB)) * 100)
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
         <WaveBackground />
@@ -278,11 +320,10 @@ export default function HearingTestPage() {
                 <label
                   key={i}
                   onClick={() => toggleCheck(i)}
-                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                    calChecks[i]
-                      ? "bg-primary/5 border-primary/30"
-                      : "border-border hover:bg-secondary/50"
-                  }`}
+                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${calChecks[i]
+                    ? "bg-primary/5 border-primary/30"
+                    : "border-border hover:bg-secondary/50"
+                    }`}
                 >
                   <span className={`material-symbols-outlined text-xl transition-colors ${calChecks[i] ? "text-primary" : "text-muted-foreground"}`}>
                     {calChecks[i] ? "check_box" : "check_box_outline_blank"}
@@ -320,7 +361,7 @@ export default function HearingTestPage() {
           <Button
             variant="outline"
             className="w-full mb-6"
-            onClick={() => playTone(1000, calDb)}
+            onClick={() => playTone(1000, calDb, 1500, "left")}
           >
             <span className="material-symbols-outlined text-base mr-2">
               {isPlaying ? "volume_up" : "play_circle"}
@@ -394,7 +435,6 @@ export default function HearingTestPage() {
 
   // ─── TESTING PAGE ────────────────────────────────────────────────────────────
   const progressPct = Math.round((completedSteps / totalSteps) * 100)
-  const sliderPct   = Math.round(((currentDb - MIN_DB) / (MAX_DB - MIN_DB)) * 100)
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
@@ -410,14 +450,11 @@ export default function HearingTestPage() {
             </span>
           </div>
           {/* Ear badge */}
-          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-semibold border ${
-            currentEar === "left"
-              ? "bg-blue-500/10 border-blue-500/30 text-blue-600"
-              : "bg-purple-500/10 border-purple-500/30 text-purple-600"
-          }`}>
-            <span className="material-symbols-outlined text-base">
-              {currentEar === "left" ? "hearing" : "hearing"}
-            </span>
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-semibold border ${currentEar === "left"
+            ? "bg-blue-500/10 border-blue-500/30 text-blue-600"
+            : "bg-purple-500/10 border-purple-500/30 text-purple-600"
+            }`}>
+            <span className="material-symbols-outlined text-base">hearing</span>
             {currentEar === "left" ? "◀ Left Ear" : "Right Ear ▶"}
           </div>
         </div>
@@ -440,13 +477,12 @@ export default function HearingTestPage() {
             <div
               key={i}
               title={FREQ_LABELS[i]}
-              className={`w-3 h-3 rounded-full border transition-all duration-300 ${
-                i < currentFreqIndex
-                  ? "bg-primary border-primary"
-                  : i === currentFreqIndex
+              className={`w-3 h-3 rounded-full border transition-all duration-300 ${i < currentFreqIndex
+                ? "bg-primary border-primary"
+                : i === currentFreqIndex
                   ? "bg-primary/40 border-primary scale-125"
                   : "bg-secondary border-border"
-              }`}
+                }`}
             />
           ))}
         </div>
@@ -482,7 +518,7 @@ export default function HearingTestPage() {
         {/* Play button */}
         <Button
           className="w-full mb-6 text-base"
-          onClick={() => playTone(currentFreq, currentDb)}
+          onClick={() => playTone(currentFreq, currentDb, 1500, currentEar)}
         >
           <span className="material-symbols-outlined mr-2">
             {isPlaying ? "volume_up" : "play_circle"}
@@ -509,22 +545,20 @@ export default function HearingTestPage() {
         <div className="grid grid-cols-2 gap-3 mb-4">
           <button
             onClick={() => handleResponse(true)}
-            className={`py-4 rounded-xl border-2 font-semibold text-base transition-all ${
-              toneHeard === true
-                ? "bg-green-500/20 border-green-500 text-green-700"
-                : "border-border hover:bg-secondary/60 text-foreground"
-            }`}
+            className={`py-4 rounded-xl border-2 font-semibold text-base transition-all ${toneHeard === true
+              ? "bg-green-500/20 border-green-500 text-green-700"
+              : "border-border hover:bg-secondary/60 text-foreground"
+              }`}
           >
             <span className="material-symbols-outlined align-middle mr-1 text-base">check</span>
             Yes, I heard it
           </button>
           <button
             onClick={() => handleResponse(false)}
-            className={`py-4 rounded-xl border-2 font-semibold text-base transition-all ${
-              toneHeard === false
-                ? "bg-red-500/20 border-red-400 text-red-700"
-                : "border-border hover:bg-secondary/60 text-foreground"
-            }`}
+            className={`py-4 rounded-xl border-2 font-semibold text-base transition-all ${toneHeard === false
+              ? "bg-red-500/20 border-red-400 text-red-700"
+              : "border-border hover:bg-secondary/60 text-foreground"
+              }`}
           >
             <span className="material-symbols-outlined align-middle mr-1 text-base">close</span>
             No, I didn't
@@ -549,4 +583,4 @@ export default function HearingTestPage() {
       </Card>
     </div>
   )
-}
+} // ← HearingTestPage closes here ✅

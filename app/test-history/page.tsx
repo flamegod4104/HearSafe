@@ -12,16 +12,25 @@ import { doc, getDoc, collection, getDocs, query, orderBy } from "firebase/fires
 import { db } from "@/lib/firebase/client"
 
 interface TestResult {
+  levelsCompleted: number
   id: string
   testDate: Date
   totalScore: number
-  levelsCompleted: number
-  results: Array<{
-    level: number
-    frequency: number
-    volumeDb: number
-    response: boolean
-  }>
+  riskLevel: string
+  ptaLeft: number
+  ptaRight: number
+  whoGradeLeft: number
+  whoGradeRight: number
+  whoLabelLeft: string
+  whoLabelRight: string
+  leftThresholds: number[]
+  rightThresholds: number[]
+  frequencies: number[]
+  ehfaMean?: number
+  hfShiftIndex?: number
+  cli?: number
+  age?: number
+  sex?: string
 }
 
 export default function TestHistoryPage() {
@@ -122,7 +131,7 @@ export default function TestHistoryPage() {
     <div className="min-h-screen">
       <WaveBackground />
       <div className="relative z-10 max-w-7xl mx-auto p-6">
-        
+
         {/* Header */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8">
           <div>
@@ -131,8 +140,8 @@ export default function TestHistoryPage() {
               Review your past hearing test results and track your progress
             </p>
           </div>
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             onClick={handleLogout}
             className="mt-4 md:mt-0 border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
           >
@@ -159,13 +168,13 @@ export default function TestHistoryPage() {
                   <p className="text-muted-foreground text-sm">{user?.email}</p>
                 </div>
               </div>
-              
+
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Member since</span>
                   <span className="font-medium">
-                    {user?.metadata.creationTime ? 
-                      new Date(user.metadata.creationTime).toLocaleDateString() : 
+                    {user?.metadata.creationTime ?
+                      new Date(user.metadata.creationTime).toLocaleDateString() :
                       'N/A'
                     }
                   </span>
@@ -177,8 +186,8 @@ export default function TestHistoryPage() {
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Last test</span>
                   <span className="font-medium">
-                    {testHistory.length > 0 ? 
-                      new Date(testHistory[0].testDate).toLocaleDateString() : 
+                    {testHistory.length > 0 ?
+                      new Date(testHistory[0].testDate).toLocaleDateString() :
                       'No tests yet'
                     }
                   </span>
@@ -194,7 +203,7 @@ export default function TestHistoryPage() {
                   <div className="text-center py-8 text-muted-foreground">
                     <span className="material-symbols-outlined text-4xl mb-2 opacity-50">hearing</span>
                     <p>No tests taken yet</p>
-                    <Button 
+                    <Button
                       onClick={() => router.push('/test/instructions')}
                       className="mt-4"
                     >
@@ -205,11 +214,10 @@ export default function TestHistoryPage() {
                   testHistory.map((test, index) => (
                     <div
                       key={test.id}
-                      className={`p-4 rounded-lg border cursor-pointer transition-all duration-200 ${
-                        selectedTest?.id === test.id
+                      className={`p-4 rounded-lg border cursor-pointer transition-all duration-200 ${selectedTest?.id === test.id
                           ? 'border-primary bg-primary/5'
                           : 'border-border hover:border-primary/50 hover:bg-primary/5'
-                      }`}
+                        }`}
                       onClick={() => setSelectedTest(test)}
                     >
                       <div className="flex justify-between items-start mb-2">
@@ -219,9 +227,9 @@ export default function TestHistoryPage() {
                           </div>
                           <div className="text-sm text-muted-foreground">
                             {new Date(test.testDate).toLocaleDateString()} at{' '}
-                            {new Date(test.testDate).toLocaleTimeString([], { 
-                              hour: '2-digit', 
-                              minute: '2-digit' 
+                            {new Date(test.testDate).toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit'
                             })}
                           </div>
                         </div>
@@ -253,13 +261,12 @@ export default function TestHistoryPage() {
                   <div className="flex justify-between items-start mb-6">
                     <div>
                       <h2 className="text-2xl font-semibold mb-2">
-                        Test Details #{testHistory.findIndex(t => t.id === selectedTest.id) + 1}
+                        Test #{testHistory.findIndex(t => t.id === selectedTest.id) + 1}
                       </h2>
                       <p className="text-muted-foreground">
-                        Taken on {new Date(selectedTest.testDate).toLocaleDateString()} at{' '}
-                        {new Date(selectedTest.testDate).toLocaleTimeString([], { 
-                          hour: '2-digit', 
-                          minute: '2-digit' 
+                        {new Date(selectedTest.testDate).toLocaleDateString()} at{" "}
+                        {new Date(selectedTest.testDate).toLocaleTimeString([], {
+                          hour: "2-digit", minute: "2-digit"
                         })}
                       </p>
                     </div>
@@ -273,89 +280,88 @@ export default function TestHistoryPage() {
                     </div>
                   </div>
 
-                  {/* Hearing Range Analysis */}
-                  <div className="mb-6">
-                    <h3 className="text-lg font-semibold mb-4">Hearing Range Analysis</h3>
-                    <div className="grid grid-cols-3 gap-4">
-                      {['Low', 'Mid', 'High'].map((range, index) => {
-                        const hearingRange = calculateHearingRange(selectedTest.results)
-                        const isNormal = index === 0 ? hearingRange.low : 
-                                        index === 1 ? hearingRange.mid : 
-                                        hearingRange.high
-                        return (
-                          <div key={range} className="text-center p-4 rounded-lg bg-secondary/30">
-                            <div className="text-sm font-semibold mb-2">{range} Frequencies</div>
-                            <div className={`text-lg font-bold ${
-                              isNormal ? 'text-green-600' : 'text-orange-600'
-                            }`}>
-                              {isNormal ? 'Normal' : 'Limited'}
-                            </div>
-                          </div>
-                        )
-                      })}
+                  {/* PTA per ear */}
+                  <div className="grid grid-cols-2 gap-4 mb-6">
+                    <div className="p-4 rounded-lg bg-blue-500/10 border border-blue-500/20 text-center">
+                      <p className="text-xs text-muted-foreground font-semibold uppercase mb-1">Left Ear PTA</p>
+                      <p className="text-2xl font-bold text-blue-600">{selectedTest.ptaLeft} dB</p>
+                      <p className="text-sm text-blue-500">{selectedTest.whoLabelLeft}</p>
+                      <p className="text-xs text-muted-foreground">WHO Grade {selectedTest.whoGradeLeft}</p>
+                    </div>
+                    <div className="p-4 rounded-lg bg-purple-500/10 border border-purple-500/20 text-center">
+                      <p className="text-xs text-muted-foreground font-semibold uppercase mb-1">Right Ear PTA</p>
+                      <p className="text-2xl font-bold text-purple-600">{selectedTest.ptaRight} dB</p>
+                      <p className="text-sm text-purple-500">{selectedTest.whoLabelRight}</p>
+                      <p className="text-xs text-muted-foreground">WHO Grade {selectedTest.whoGradeRight}</p>
                     </div>
                   </div>
 
-                  {/* Detailed Results Table */}
-                  <div>
-                    <h3 className="text-lg font-semibold mb-4">Detailed Results</h3>
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
-                        <thead>
-                          <tr className="border-b">
-                            <th className="text-left py-3 font-semibold">Level</th>
-                            <th className="text-left py-3 font-semibold">Frequency</th>
-                            <th className="text-left py-3 font-semibold">Volume</th>
-                            <th className="text-left py-3 font-semibold">Result</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {selectedTest.results.map((result, index) => (
-                            <tr key={index} className="border-b border-border/50">
-                              <td className="py-3">L{result.level}</td>
-                              <td className="py-3">{result.frequency}Hz</td>
-                              <td className="py-3">{result.volumeDb}dB</td>
-                              <td className="py-3">
-                                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs ${
-                                  result.response 
-                                    ? 'bg-green-500/20 text-green-600' 
-                                    : 'bg-orange-500/20 text-orange-600'
-                                }`}>
-                                  {result.response ? (
-                                    <>
-                                      <span className="material-symbols-outlined text-xs mr-1">check</span>
-                                      Heard
-                                    </>
-                                  ) : (
-                                    <>
-                                      <span className="material-symbols-outlined text-xs mr-1">close</span>
-                                      Missed
-                                    </>
-                                  )}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                  {/* AI Metrics if available */}
+                  {(selectedTest.ehfaMean != null || selectedTest.cli != null) && (
+                    <div className="grid grid-cols-3 gap-3 mb-6">
+                      {selectedTest.ehfaMean != null && (
+                        <div className="p-3 rounded-lg bg-secondary/40 text-center">
+                          <p className="text-xs text-muted-foreground mb-1">EHFA Mean</p>
+                          <p className="font-bold text-primary">{selectedTest.ehfaMean} dB</p>
+                        </div>
+                      )}
+                      {selectedTest.hfShiftIndex != null && (
+                        <div className="p-3 rounded-lg bg-secondary/40 text-center">
+                          <p className="text-xs text-muted-foreground mb-1">HF Shift</p>
+                          <p className="font-bold text-purple-500">{selectedTest.hfShiftIndex} dB</p>
+                        </div>
+                      )}
+                      {selectedTest.cli != null && (
+                        <div className="p-3 rounded-lg bg-secondary/40 text-center">
+                          <p className="text-xs text-muted-foreground mb-1">CLI</p>
+                          <p className="font-bold text-blue-500">{selectedTest.cli}</p>
+                        </div>
+                      )}
                     </div>
-                  </div>
+                  )}
+
+                  {/* Threshold table */}
+                  {selectedTest.leftThresholds?.length > 0 && (
+                    <div>
+                      <h3 className="text-lg font-semibold mb-3">Hearing Thresholds</h3>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b border-border">
+                              <th className="text-left py-2 px-3 text-muted-foreground text-xs uppercase">Ear</th>
+                              {selectedTest.frequencies?.map(f => (
+                                <th key={f} className="text-center py-2 px-2 text-muted-foreground text-xs uppercase">
+                                  {f >= 1000 ? `${f / 1000}k` : f}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {[
+                              { label: "Left", vals: selectedTest.leftThresholds, color: "text-blue-500" },
+                              { label: "Right", vals: selectedTest.rightThresholds, color: "text-purple-500" },
+                            ].map(({ label, vals, color }) => (
+                              <tr key={label} className="border-b border-border/50">
+                                <td className={`py-2 px-3 font-semibold ${color}`}>{label}</td>
+                                {vals?.map((v, i) => (
+                                  <td key={i} className="py-2 px-2 text-center text-xs">{v} dB</td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
                 </Card>
 
                 {/* Action Buttons */}
                 <div className="flex gap-4">
-                  <Button 
-                    onClick={() => router.push('/test/instructions')}
-                    className="flex-1"
-                  >
+                  <Button onClick={() => router.push("/test")} className="flex-1">
                     <span className="material-symbols-outlined mr-2">refresh</span>
                     Take New Test
                   </Button>
-                  <Button 
-                    variant="outline" 
-                    onClick={() => router.push('/results')}
-                    className="flex-1"
-                  >
+                  <Button variant="outline" onClick={() => router.push("/results")} className="flex-1">
                     <span className="material-symbols-outlined mr-2">bar_chart</span>
                     View Latest Results
                   </Button>
